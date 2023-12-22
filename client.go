@@ -12,6 +12,15 @@ import (
 	"context"
 	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"log"
+	"time"
+)
+
+const (
+	InitialRetryInterval = 5 * time.Second
+	MaxRetryInterval     = 600 * time.Second
+	MaxRetryDuration     = 10 * time.Minute
+	WaitAfterMaxDuration = 30 * time.Minute
 )
 
 type Client struct {
@@ -19,12 +28,61 @@ type Client struct {
 	channel *amqp.Channel
 }
 
-// NewClient 创建一个新的 AMQP 客户端
-func NewClient(amqpUrl string) (*Client, error) {
+func connect(amqpUrl string) (*amqp.Connection, error) {
 	conn, err := amqp.Dial(amqpUrl)
 	if err != nil {
 		return nil, err
 	}
+	return conn, nil
+}
+
+func ReConnect(url string) *amqp.Connection {
+	retryInterval := InitialRetryInterval
+	retryDeadline := time.Now().Add(MaxRetryDuration)
+
+	for {
+		conn, err := connect(url)
+		if err == nil {
+			log.Println("Connected to RabbitMQ")
+			return conn
+		}
+
+		if time.Now().After(retryDeadline) {
+			log.Println("Failed to reconnect after 10 minutes. Waiting for 30 minutes before retrying...")
+			time.Sleep(WaitAfterMaxDuration)
+			retryInterval = InitialRetryInterval
+			retryDeadline = time.Now().Add(MaxRetryDuration)
+		} else {
+
+			log.Printf("Failed to reconnect. Retrying in %s ...", FormatDuration(retryInterval))
+			time.Sleep(retryInterval)
+			retryInterval *= 2
+			if retryInterval > MaxRetryInterval {
+				retryInterval = MaxRetryInterval
+			}
+		}
+	}
+}
+
+// NewClient 创建一个新的 AMQP 客户端
+func NewClient(amqpUrl string) (*Client, error) {
+	//conn, err := amqp.Dial(amqpUrl)
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	// 创建连接
+	conn := ReConnect(amqpUrl)
+
+	// 当连接断开时，自动重新连接
+	go func() {
+		for {
+			closeErr := <-conn.NotifyClose(make(chan *amqp.Error))
+			log.Printf("Connection closed error [%v] Reconnecting...", closeErr)
+			conn = ReConnect(amqpUrl)
+		}
+	}()
+
 	ch, err := conn.Channel()
 	if err != nil {
 		return nil, err
@@ -47,7 +105,7 @@ func (c *Client) Publish(ctx context.Context, queueName string, body string) err
 
 	q, err := c.channel.QueueDeclare(
 		queueName, // 队列名称
-		false,     // 是否持久化
+		true,      // 是否持久化
 		false,     // 是否独占
 		false,     // 是否自动删除
 		false,     // 是否等待
@@ -78,7 +136,7 @@ func (c *Client) Consume(queueName string, handler func(delivery amqp.Delivery))
 
 	q, err := c.channel.QueueDeclare(
 		queueName, // 队列名称
-		false,     // 是否持久化
+		true,      // 是否持久化
 		false,     // 是否独占
 		false,     // 是否自动删除
 		false,     // 是否等待
