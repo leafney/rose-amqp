@@ -10,9 +10,11 @@ package ramqp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
+	"runtime"
 	"time"
 )
 
@@ -23,28 +25,105 @@ const (
 	WaitAfterMaxDuration = 30 * time.Minute
 )
 
+var (
+	errAlreadyClosed = errors.New("already closed: not connected to the AMQP server")
+)
+
 type Client struct {
-	conn    *amqp.Connection
-	channel *amqp.Channel
+	url             string
+	conn            *amqp.Connection
+	channel         *amqp.Channel
+	connNotifyClose chan *amqp.Error
+	chNotifyClose   chan *amqp.Error
+	done            chan bool
+	quit            chan struct{}
+	isConnected     bool
 }
 
-func connect(amqpUrl string) (*amqp.Connection, error) {
-	conn, err := amqp.Dial(amqpUrl)
-	if err != nil {
+// NewClient 创建一个新的 AMQP 客户端
+func NewClient(amqpUrl string) (*Client, error) {
+	client := &Client{url: amqpUrl}
+
+	ok, err := client.connect(amqpUrl)
+	if err != nil || !ok {
 		return nil, err
 	}
-	return conn, nil
+
+	go client.handleReconnect()
+
+	return client, nil
 }
 
-func ReConnect(url string) *amqp.Connection {
+func (c *Client) connect(amqpUrl string) (bool, error) {
+
+	conn, err := amqp.Dial(amqpUrl)
+	if err != nil {
+		return false, err
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		return false, err
+	}
+
+	c.isConnected = true
+	c.changeConnect(conn, ch)
+
+	return true, nil
+}
+
+func (c *Client) changeConnect(connection *amqp.Connection, channel *amqp.Channel) {
+	c.conn = connection
+	c.connNotifyClose = make(chan *amqp.Error)
+	c.conn.NotifyClose(c.connNotifyClose)
+
+	c.channel = channel
+	c.chNotifyClose = make(chan *amqp.Error)
+	c.channel.NotifyClose(c.chNotifyClose)
+}
+
+func (c *Client) handleReconnect() {
+	// 当连接断开时，自动重新连接
+	for {
+		if !c.isConnected {
+			// 未连接
+			log.Println("Attempting to connect")
+			c.reConnect()
+		}
+
+		log.Println("handleReconnect for connected")
+		runtime.Gosched()
+
+		select {
+		case <-c.quit:
+			log.Println("quit")
+			return
+		case err := <-c.connNotifyClose:
+			log.Printf("connection close notify: %v", err)
+			c.isConnected = false
+		case err := <-c.chNotifyClose:
+			log.Printf("channel close notify: %v", err)
+			c.isConnected = false
+
+		}
+	}
+}
+
+func (c *Client) reConnect() {
 	retryInterval := InitialRetryInterval
 	retryDeadline := time.Now().Add(MaxRetryDuration)
 
 	for {
-		conn, err := connect(url)
-		if err == nil {
+
+		var (
+			connected = false
+			err       error
+		)
+
+		if connected, err = c.connect(c.url); err == nil {
 			log.Println("Connected to RabbitMQ")
-			return conn
+			log.Printf("connected %v", connected)
+			return
 		}
 
 		if time.Now().After(retryDeadline) {
@@ -64,44 +143,36 @@ func ReConnect(url string) *amqp.Connection {
 	}
 }
 
-// NewClient 创建一个新的 AMQP 客户端
-func NewClient(amqpUrl string) (*Client, error) {
-	//conn, err := amqp.Dial(amqpUrl)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	// 创建连接
-	conn := ReConnect(amqpUrl)
-
-	// 当连接断开时，自动重新连接
-	go func() {
-		for {
-			closeErr := <-conn.NotifyClose(make(chan *amqp.Error))
-			log.Printf("Connection closed error [%v] Reconnecting...", closeErr)
-			conn = ReConnect(amqpUrl)
-		}
-	}()
-
-	ch, err := conn.Channel()
-	if err != nil {
-		return nil, err
-	}
-	return &Client{conn, ch}, nil
-}
-
 // Close 关闭 AMQP 连接和通道
 func (c *Client) Close() error {
+	log.Println("close")
+
+	if !c.isConnected {
+		return errAlreadyClosed
+	}
+
 	if err := c.channel.Close(); err != nil {
 		return fmt.Errorf("channel.Close error: %v", err)
 	}
 	if err := c.conn.Close(); err != nil {
 		return fmt.Errorf("conn.Close error: %v", err)
 	}
+
+	close(c.quit)
+	c.isConnected = false
+
 	return nil
 }
 
+func (c *Client) IsConnected() bool {
+	return c.isConnected
+}
+
 func (c *Client) Publish(ctx context.Context, queueName string, body string) error {
+
+	log.Printf("publish channel %v", c.channel)
+
+	//c.channe
 
 	q, err := c.channel.QueueDeclare(
 		queueName, // 队列名称
@@ -116,8 +187,9 @@ func (c *Client) Publish(ctx context.Context, queueName string, body string) err
 	}
 
 	msg := amqp.Publishing{
-		ContentType: "text/plain",
-		Body:        []byte(body),
+		DeliveryMode: amqp.Persistent,
+		ContentType:  "text/plain",
+		Body:         []byte(body),
 	}
 
 	if err := c.channel.PublishWithContext(ctx,
@@ -134,6 +206,8 @@ func (c *Client) Publish(ctx context.Context, queueName string, body string) err
 
 func (c *Client) Consume(queueName string, handler func(delivery amqp.Delivery)) error {
 
+	log.Printf("Consume channel %v", c.channel)
+
 	q, err := c.channel.QueueDeclare(
 		queueName, // 队列名称
 		true,      // 是否持久化
@@ -146,10 +220,14 @@ func (c *Client) Consume(queueName string, handler func(delivery amqp.Delivery))
 		return fmt.Errorf("channel.QueueDeclare error: %v", err)
 	}
 
+	if err := c.channel.Qos(1, 0, true); err != nil {
+		log.Println(err)
+	}
+
 	msgs, err := c.channel.Consume(
 		q.Name,
 		"",    // consumer 消费者标识
-		true,  // autoAck 是否自动应答
+		false, // autoAck 是否自动应答
 		false, // exclusive 是否独占
 		false, // noLocal
 		false, // noWait 是否阻塞

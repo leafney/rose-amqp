@@ -10,7 +10,9 @@ package ramqp
 
 import (
 	"context"
+	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"log"
 	"testing"
 	"time"
 )
@@ -28,23 +30,41 @@ func TestNewClient(t *testing.T) {
 	defer client.Close()
 
 	//	发布消息
-	ctx := context.Background()
-	err = client.Publish(ctx, "test", "hello")
-	if err != nil {
-		//t.Fatal(err)
-		t.Error(err)
-	}
+	go func() {
+		i := 0
+		for {
+			if !client.IsConnected() {
+				log.Println("sleep wait connect")
+				time.Sleep(1 * time.Second)
+				continue
+			}
 
-	time.Sleep(5 * time.Second)
+			msg := fmt.Sprintf("hello %d", i)
+			log.Printf("publish %v", msg)
+			err := client.Publish(context.Background(), "test", msg)
+			if err != nil {
+				t.Error(err)
+			}
+			time.Sleep(5 * time.Second)
+			i += 1
+		}
+	}()
 
-	err = client.Consume("test", func(d amqp.Delivery) {
-		msg := string(d.Body)
-		t.Logf("接收到消息 %v", msg)
-	})
-	if err != nil {
-		//t.Fatal(err)
-		t.Error(err)
-	}
+	log.Println("发布完毕")
+	//time.Sleep(10 * time.Second)
+
+	go func() {
+		err := client.Consume("test", func(d amqp.Delivery) {
+			msg := string(d.Body)
+			t.Logf("接收到消息 %v", msg)
+			time.Sleep(5 * time.Second)
+			d.Ack(false)
+		})
+		if err != nil {
+			t.Error(err)
+		}
+
+	}()
 
 	//time.Sleep(30 * time.Second)
 
