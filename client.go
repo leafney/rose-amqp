@@ -14,7 +14,6 @@ import (
 	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
-	"runtime"
 	"time"
 )
 
@@ -92,7 +91,6 @@ func (c *Client) handleReconnect() {
 		}
 
 		log.Println("handleReconnect for connected")
-		runtime.Gosched()
 
 		select {
 		case <-c.quit:

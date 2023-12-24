@@ -11,7 +11,6 @@ package ramqp
 import (
 	"context"
 	"fmt"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"testing"
 	"time"
@@ -45,6 +44,8 @@ func TestNewClient(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
+
+			log.Println("sleep sleep")
 			time.Sleep(5 * time.Second)
 			i += 1
 		}
@@ -53,18 +54,18 @@ func TestNewClient(t *testing.T) {
 	log.Println("发布完毕")
 	//time.Sleep(10 * time.Second)
 
-	go func() {
-		err := client.Consume("test", func(d amqp.Delivery) {
-			msg := string(d.Body)
-			t.Logf("接收到消息 %v", msg)
-			time.Sleep(5 * time.Second)
-			d.Ack(false)
-		})
-		if err != nil {
-			t.Error(err)
-		}
-
-	}()
+	//go func() {
+	//	err := client.Consume("test", func(d amqp.Delivery) {
+	//		msg := string(d.Body)
+	//		t.Logf("接收到消息 %v", msg)
+	//		time.Sleep(5 * time.Second)
+	//		d.Ack(false)
+	//	})
+	//	if err != nil {
+	//		t.Error(err)
+	//	}
+	//
+	//}()
 
 	//time.Sleep(30 * time.Second)
 
