@@ -9,7 +9,6 @@
 package ramqp
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -29,116 +28,59 @@ var (
 )
 
 type Client struct {
-	url             string
-	conn            *amqp.Connection
-	channel         *amqp.Channel
-	connNotifyClose chan *amqp.Error
-	chNotifyClose   chan *amqp.Error
-	done            chan bool
-	quit            chan struct{}
-	isConnected     bool
+	url                string
+	conn               *amqp.Connection
+	channel            *amqp.Channel
+	connNotifyClose    chan *amqp.Error
+	channelNotifyClose chan *amqp.Error
+	disConnection      chan bool
+	quit               chan struct{}
+	isConnected        bool
+
+	//useExchange  bool
+	//exchangeName string
+	//routingKey   string
 }
 
 // NewClient 创建一个新的 AMQP 客户端
 func NewClient(amqpUrl string) (*Client, error) {
-	client := &Client{url: amqpUrl}
-
-	ok, err := client.connect(amqpUrl)
-	if err != nil || !ok {
-		return nil, err
+	client := &Client{
+		url:                amqpUrl,
+		connNotifyClose:    make(chan *amqp.Error),
+		channelNotifyClose: make(chan *amqp.Error),
+		disConnection:      make(chan bool),
+		quit:               make(chan struct{}),
+		isConnected:        false,
 	}
 
-	go client.handleReconnect()
+	if err := client.connect(amqpUrl); err != nil {
+		return nil, err
+	}
 
 	return client, nil
 }
 
-func (c *Client) connect(amqpUrl string) (bool, error) {
+func (c *Client) connect(amqpUrl string) error {
+	var err error
 
-	conn, err := amqp.Dial(amqpUrl)
+	c.conn, err = amqp.Dial(amqpUrl)
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	ch, err := conn.Channel()
+	c.channel, err = c.conn.Channel()
 	if err != nil {
-		return false, err
+		return err
 	}
+
+	// TODO 第三版
+	//c.channel, err = c.DefChannel()
+
+	c.conn.NotifyClose(c.connNotifyClose)
+	c.channel.NotifyClose(c.channelNotifyClose)
 
 	c.isConnected = true
-	c.changeConnect(conn, ch)
-
-	return true, nil
-}
-
-func (c *Client) changeConnect(connection *amqp.Connection, channel *amqp.Channel) {
-	c.conn = connection
-	c.connNotifyClose = make(chan *amqp.Error)
-	c.conn.NotifyClose(c.connNotifyClose)
-
-	c.channel = channel
-	c.chNotifyClose = make(chan *amqp.Error)
-	c.channel.NotifyClose(c.chNotifyClose)
-}
-
-func (c *Client) handleReconnect() {
-	// 当连接断开时，自动重新连接
-	for {
-		if !c.isConnected {
-			// 未连接
-			log.Println("Attempting to connect")
-			c.reConnect()
-		}
-
-		log.Println("handleReconnect for connected")
-
-		select {
-		case <-c.quit:
-			log.Println("quit")
-			return
-		case err := <-c.connNotifyClose:
-			log.Printf("connection close notify: %v", err)
-			c.isConnected = false
-		case err := <-c.chNotifyClose:
-			log.Printf("channel close notify: %v", err)
-			c.isConnected = false
-
-		}
-	}
-}
-
-func (c *Client) reConnect() {
-	retryInterval := InitialRetryInterval
-	retryDeadline := time.Now().Add(MaxRetryDuration)
-
-	for {
-
-		var (
-			connected = false
-			err       error
-		)
-
-		if connected, err = c.connect(c.url); err == nil {
-			log.Println("Connected to RabbitMQ")
-			log.Printf("connected %v", connected)
-			return
-		}
-
-		if time.Now().After(retryDeadline) {
-			log.Println("Failed to reconnect after 10 minutes. Waiting for 30 minutes before retrying...")
-			time.Sleep(WaitAfterMaxDuration)
-			retryInterval = InitialRetryInterval
-			retryDeadline = time.Now().Add(MaxRetryDuration)
-		} else {
-
-			log.Printf("Failed to reconnect. Retrying in %s ...", FormatDuration(retryInterval))
-			time.Sleep(retryInterval)
-			retryInterval *= 2
-			if retryInterval > MaxRetryInterval {
-				retryInterval = MaxRetryInterval
-			}
-		}
-	}
+	return nil
 }
 
 // Close 关闭 AMQP 连接和通道
@@ -162,6 +104,76 @@ func (c *Client) Close() error {
 	return nil
 }
 
+/*
+func (c *Client) changeConnect(connection *amqp.Connection, channel *amqp.Channel) {
+	c.conn = connection
+	c.connNotifyClose = make(chan *amqp.Error)
+	c.conn.NotifyClose(c.connNotifyClose)
+
+	c.channel = channel
+	c.channelNotifyClose = make(chan *amqp.Error)
+	c.channel.NotifyClose(c.channelNotifyClose)
+}
+
+func (c *Client) Listen() {
+	go c.handleReconnect()
+}
+
+func (c *Client) handleReconnect() {
+	// 当连接断开时，自动重新连接
+	for {
+		if !c.isConnected {
+			// 未连接
+			log.Println("Attempting to connect")
+			c.reConnect()
+		}
+
+		log.Println("handleReconnect for connected")
+
+		select {
+		case <-c.quit:
+			log.Println("quit")
+			return
+		case err := <-c.connNotifyClose:
+			log.Printf("connection close notify: %v", err)
+			c.isConnected = false
+		case err := <-c.channelNotifyClose:
+			log.Printf("channel close notify: %v", err)
+			c.isConnected = false
+
+		}
+	}
+}
+
+func (c *Client) reConnect() {
+	retryInterval := InitialRetryInterval
+	retryDeadline := time.Now().Add(MaxRetryDuration)
+
+	for {
+
+		if err := c.connect(c.url); err == nil {
+			log.Println("Connected to RabbitMQ")
+			return
+		}
+
+		if time.Now().After(retryDeadline) {
+			log.Println("Failed to reconnect after 10 minutes. Waiting for 30 minutes before retrying...")
+			time.Sleep(WaitAfterMaxDuration)
+			retryInterval = InitialRetryInterval
+			retryDeadline = time.Now().Add(MaxRetryDuration)
+		} else {
+
+			log.Printf("Failed to reconnect. Retrying in %s ...", FormatDuration(retryInterval))
+			time.Sleep(retryInterval)
+			retryInterval *= 2
+			if retryInterval > MaxRetryInterval {
+				retryInterval = MaxRetryInterval
+			}
+		}
+	}
+}
+
+
 func (c *Client) IsConnected() bool {
 	return c.isConnected
 }
@@ -169,8 +181,6 @@ func (c *Client) IsConnected() bool {
 func (c *Client) Publish(ctx context.Context, queueName string, body string) error {
 
 	log.Printf("publish channel %v", c.channel)
-
-	//c.channe
 
 	q, err := c.channel.QueueDeclare(
 		queueName, // 队列名称
@@ -243,3 +253,5 @@ func (c *Client) Consume(queueName string, handler func(delivery amqp.Delivery))
 
 	return nil
 }
+
+*/
