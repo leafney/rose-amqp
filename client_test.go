@@ -338,3 +338,30 @@ func TestFour(t *testing.T) {
 
 	select {}
 }
+
+// topics
+func TestFive(t *testing.T) {
+	client, err := NewClient(AMQPUrl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	//	producer
+
+	e5, err := client.
+		NewExchange("ddd").
+		SetKind(KindTopic).
+		SetDurable(true).
+		SetRoutingKey(""). // routingKey 可以在这里声明，统一的
+		Do()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	e5.
+		//SetRoutingKey(""). // routingKey 也可以在这里声明，可以设置每次发布不同值
+		Publish(context.Background(), "hello")
+
+}

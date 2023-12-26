@@ -199,10 +199,12 @@ type Queue struct {
 	noWait     bool
 	args       amqp.Table
 
-	useBind  bool
-	exchange *Exchange
+	useBind         bool
+	exchange        *Exchange
+	bindRoutingKeys []string
 
-	useQos        bool
+	useQos bool
+
 	prefetchCount int
 	global        bool
 }
@@ -217,7 +219,9 @@ func (c *Client) NewQueue(name string) *Queue {
 		noWait:     false,
 		args:       nil,
 
-		useBind:       false,
+		useBind:         false,
+		bindRoutingKeys: make([]string, 0),
+
 		useQos:        false,
 		prefetchCount: 0,
 		global:        false,
@@ -243,6 +247,16 @@ func (q *Queue) SetQos(count int, global bool) *Queue {
 func (q *Queue) BindExchange(exchange *Exchange) *Queue {
 	q.useBind = true
 	q.exchange = exchange
+	return q
+}
+
+// SetBindRoutingKeys 如何设置则自定义队列绑定key，否则使用exchange中定义的key
+func (q *Queue) SetBindRoutingKeys(keys []string) *Queue {
+	if len(keys) > 0 {
+		q.bindRoutingKeys = keys
+	} else {
+		q.bindRoutingKeys = append(q.bindRoutingKeys, q.exchange.routingKey)
+	}
 	return q
 }
 
@@ -276,15 +290,17 @@ func (q *Queue) Do() (queue *Queue, err error) {
 
 		log.Printf("key [%v] ename [%v] queueName [%v]", q.exchange.routingKey, q.exchange.exchangeName, theQ.Name)
 
-		err = q.channel.QueueBind(
-			theQ.Name,
-			q.exchange.routingKey,
-			q.exchange.exchangeName,
-			false,
-			nil,
-		)
-		if err != nil {
-			return nil, err
+		for _, key := range q.bindRoutingKeys {
+			err = q.channel.QueueBind(
+				theQ.Name,
+				key,
+				q.exchange.exchangeName,
+				false,
+				nil,
+			)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
