@@ -87,26 +87,24 @@ const (
 )
 
 func (c *Client) NewExchange(name string) *Exchange {
-
 	return &Exchange{
 		channel:      c.channel,
 		exchangeName: name,
-		//kind:         amqp.ExchangeDirect,
-		kind:       "",
-		routingKey: "",
-		queueName:  "",
-		noExchange: false,
+		kind:         amqp.DefaultExchange,
+		routingKey:   "",
+		queueName:    "",
+		noExchange:   false,
 	}
 }
 
 func (c *Client) NoExchangeOnlyQueue(name string) *Exchange {
 	e := c.NewExchange("")
-	e.queueName = name
 	e.noExchange = true
+	e.queueName = name
 	return e
 }
 
-func (c *Exchange) SetKind(t EKind) *Exchange {
+func (e *Exchange) SetKind(t EKind) *Exchange {
 	var _t = ""
 	switch t {
 	case KindFanout:
@@ -123,23 +121,28 @@ func (c *Exchange) SetKind(t EKind) *Exchange {
 		_t = amqp.ExchangeDirect
 	}
 
-	c.kind = _t
-	return c
+	e.kind = _t
+	return e
 }
 
-func (c *Exchange) SetRoutingKey(key string) *Exchange {
-	c.routingKey = key
-	return c
+func (e *Exchange) SetRoutingKey(key string) *Exchange {
+	e.routingKey = key
+	return e
 }
 
-func (c *Exchange) Do() (exchange *Exchange, err error) {
-	//if rose.StrIsEmpty(c.exchangeName) {
-	if c.noExchange {
-		log.Printf("exchange Do noExchange queue [%v]", c.queueName)
+func (e *Exchange) SetDurable(durable bool) *Exchange {
+	e.durable = durable
+	return e
+}
+
+func (e *Exchange) Do() (exchange *Exchange, err error) {
+	//if rose.StrIsEmpty(e.exchangeName) {
+	if e.noExchange {
+		log.Printf("exchange Do noExchange queue [%v]", e.queueName)
 		//	name empty so routingKey equal queueName
-		q, err := c.channel.QueueDeclare(
-			c.queueName,
-			true,
+		theQ, err := e.channel.QueueDeclare(
+			e.queueName,
+			e.durable,
 			false,
 			false,
 			false,
@@ -149,16 +152,16 @@ func (c *Exchange) Do() (exchange *Exchange, err error) {
 			return nil, err
 		}
 
-		c.routingKey = q.Name
+		e.routingKey = theQ.Name
 
 	} else {
 
-		log.Printf("ExchangeDeclare ename [%v] kind [%v]", c.exchangeName, c.kind)
+		log.Printf("ExchangeDeclare ename [%v] kind [%v]", e.exchangeName, e.kind)
 
-		err = c.channel.ExchangeDeclare(
-			c.exchangeName,
-			c.kind,
-			true,
+		err = e.channel.ExchangeDeclare(
+			e.exchangeName,
+			e.kind,
+			e.durable,
 			false,
 			false,
 			false,
@@ -166,23 +169,23 @@ func (c *Exchange) Do() (exchange *Exchange, err error) {
 		)
 	}
 
-	return c, err
+	return e, err
 }
 
-func (c *Exchange) Publish(ctx context.Context, body string) error {
+func (e *Exchange) Publish(ctx context.Context, body string) error {
 
-	log.Printf("publish eName [%v] key [%v]", c.exchangeName, c.routingKey)
+	log.Printf("publish eName [%v] key [%v]", e.exchangeName, e.routingKey)
 
-	return c.channel.PublishWithContext(
+	return e.channel.PublishWithContext(
 		ctx,
-		c.exchangeName,
-		c.routingKey,
+		e.exchangeName,
+		e.routingKey,
 		false,
 		false,
 		amqp.Publishing{
-			//DeliveryMode: amqp.Persistent,
-			ContentType: "text/plain",
-			Body:        []byte(body),
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "text/plain",
+			Body:         []byte(body),
 		},
 	)
 }
@@ -190,11 +193,11 @@ func (c *Exchange) Publish(ctx context.Context, body string) error {
 type Queue struct {
 	channel    *amqp.Channel
 	queueName  string
-	Durable    bool
-	AutoDelete bool
-	Exclusive  bool
-	NoWait     bool
-	Args       amqp.Table
+	durable    bool
+	autoDelete bool
+	exclusive  bool
+	noWait     bool
+	args       amqp.Table
 
 	useBind  bool
 	exchange *Exchange
@@ -208,11 +211,11 @@ func (c *Client) NewQueue(name string) *Queue {
 	return &Queue{
 		channel:    c.channel,
 		queueName:  name,
-		Durable:    true,
-		AutoDelete: false,
-		Exclusive:  false,
-		NoWait:     false,
-		Args:       nil,
+		durable:    false,
+		autoDelete: false,
+		exclusive:  false,
+		noWait:     false,
+		args:       nil,
 
 		useBind:       false,
 		useQos:        false,
@@ -225,33 +228,33 @@ func (c *Client) DefQueue() *Queue {
 	return c.NewQueue("")
 }
 
-func (c *Queue) SetDurable(durable bool) *Queue {
-	c.Durable = durable
-	return c
+func (q *Queue) SetDurable(durable bool) *Queue {
+	q.durable = durable
+	return q
 }
 
-func (c *Queue) SetQos(count int, global bool) *Queue {
-	c.useQos = true
-	c.prefetchCount = count
-	c.global = global
-	return c
+func (q *Queue) SetQos(count int, global bool) *Queue {
+	q.useQos = true
+	q.prefetchCount = count
+	q.global = global
+	return q
 }
 
-func (c *Queue) BindExchange(exchange *Exchange) *Queue {
-	c.useBind = true
-	c.exchange = exchange
-	return c
+func (q *Queue) BindExchange(exchange *Exchange) *Queue {
+	q.useBind = true
+	q.exchange = exchange
+	return q
 }
 
-func (c *Queue) Do() (queue *Queue, err error) {
+func (q *Queue) Do() (queue *Queue, err error) {
 
-	log.Printf("queue Do queueName [%v]", c.queueName)
+	log.Printf("queue Do queueName [%v]", q.queueName)
 
-	q, err := c.channel.QueueDeclare(
-		c.queueName,
+	theQ, err := q.channel.QueueDeclare(
+		q.queueName,
+		q.durable,
 		false,
 		false,
-		true,
 		false,
 		nil,
 	)
@@ -260,24 +263,23 @@ func (c *Queue) Do() (queue *Queue, err error) {
 	}
 
 	// important：Redefine the queue name
-	c.queueName = q.Name
+	q.queueName = theQ.Name
 
-	if c.useQos {
-		err = c.channel.Qos(c.prefetchCount, 0, c.global)
+	if q.useQos {
+		err = q.channel.Qos(q.prefetchCount, 0, q.global)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	if c.useBind {
+	if q.useBind {
 
-		log.Printf("key [%v] ename [%v] queueName [%v]", c.exchange.routingKey, c.exchange.exchangeName, q.Name)
+		log.Printf("key [%v] ename [%v] queueName [%v]", q.exchange.routingKey, q.exchange.exchangeName, theQ.Name)
 
-		err = c.channel.QueueBind(
-			q.Name,
-			//c.exchange.routingKey,
-			"",
-			c.exchange.exchangeName,
+		err = q.channel.QueueBind(
+			theQ.Name,
+			q.exchange.routingKey,
+			q.exchange.exchangeName,
 			false,
 			nil,
 		)
@@ -286,13 +288,13 @@ func (c *Queue) Do() (queue *Queue, err error) {
 		}
 	}
 
-	return c, nil
+	return q, nil
 }
 
-func (c *Queue) Consume(handler func(delivery amqp.Delivery)) error {
+func (q *Queue) Consume(handler func(delivery amqp.Delivery)) error {
 
-	msgs, err := c.channel.Consume(
-		c.queueName,
+	msgs, err := q.channel.Consume(
+		q.queueName,
 		"",    // consumer 消费者标识
 		true,  // autoAck 是否自动应答
 		false, // exclusive 是否独占

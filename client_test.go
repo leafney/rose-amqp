@@ -178,7 +178,7 @@ func TestThree(t *testing.T) {
 	select {}
 }
 
-// fanout
+// fanout Publish/Subscribe
 func TestFour(t *testing.T) {
 	client, err := NewClient(AMQPUrl)
 	if err != nil {
@@ -281,7 +281,7 @@ func TestFour(t *testing.T) {
 	//}
 
 	// producer
-	e2, err := client.NewExchange("bbb").SetKind(KindFanout).Do()
+	e2, err := client.NewExchange("bbb").SetKind(KindFanout).SetDurable(true).Do()
 	if err != nil {
 		t.Error(err)
 		return
