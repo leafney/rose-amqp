@@ -77,6 +77,7 @@ func TestOne(t *testing.T) {
 	*/
 }
 
+// direct Routing mode
 func TestTwo(t *testing.T) {
 	client, err := NewClient(AMQPUrl)
 	if err != nil {
@@ -86,13 +87,14 @@ func TestTwo(t *testing.T) {
 
 	//
 
-	if err := client.NewExchange("hello").SetType("direct").
-		Do(); err != nil {
+	eee, err := client.NewExchange("hello").SetKind(KindDirect).
+		Do()
+	if err != nil {
 		t.Error(err)
 	}
 
 	qq, err := client.NewQueue("world").
-		BindExchange("hello", "nihao").
+		BindExchange(eee).
 		Do()
 	if err != nil {
 		t.Error(err)
@@ -101,7 +103,7 @@ func TestTwo(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		msg := fmt.Sprintf("hello %d", i)
 		log.Printf("publish %v", msg)
-		if err := qq.Publish(context.Background(), msg); err != nil {
+		if err := eee.Publish(context.Background(), msg); err != nil {
 			t.Error(err)
 		}
 	}
@@ -114,6 +116,225 @@ func TestTwo(t *testing.T) {
 			d.Ack(false)
 		})
 	}()
+
+	select {}
+}
+
+// work queues
+func TestThree(t *testing.T) {
+	client, err := NewClient(AMQPUrl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	// producer
+	e1, err := client.NoExchangeOnlyQueue("aaa").Do()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	for i := 0; i < 10; i++ {
+		msg := fmt.Sprintf("hello %d", i)
+		log.Printf("publish %v", msg)
+		if err := e1.Publish(context.Background(), msg); err != nil {
+			t.Error(err)
+		}
+	}
+
+	// consumer 1
+	go func() {
+		q1, err := client.NewQueue("aaa").SetQos(1, false).Do()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		q1.Consume(func(d amqp.Delivery) {
+			msg := string(d.Body)
+			t.Logf("[111] 接收到消息 %v", msg)
+			time.Sleep(5 * time.Second)
+			d.Ack(false)
+		})
+
+	}()
+
+	// consumer 2
+	go func() {
+		q1, err := client.NewQueue("aaa").SetQos(1, false).Do()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		q1.Consume(func(d amqp.Delivery) {
+			msg := string(d.Body)
+			t.Logf("[222] 接收到消息 %v", msg)
+			time.Sleep(5 * time.Second)
+			d.Ack(false)
+		})
+
+	}()
+
+	select {}
+}
+
+// fanout
+func TestFour(t *testing.T) {
+	client, err := NewClient(AMQPUrl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	//
+	//client.channel.ExchangeDeclare(
+	//	"ccc",
+	//	amqp.ExchangeFanout,
+	//	true,
+	//	false,
+	//	false,
+	//	false,
+	//	nil,
+	//)
+
+	//go func() {
+	//	q, _ := client.channel.QueueDeclare(
+	//		"",
+	//		false,
+	//		false,
+	//		true,
+	//		false,
+	//		nil,
+	//	)
+	//
+	//	client.channel.QueueBind(q.Name,
+	//		"",
+	//		"bbb",
+	//		false,
+	//		nil,
+	//	)
+	//	msgs, _ := client.channel.Consume(
+	//		q.Name,
+	//		"",
+	//		true,
+	//		false,
+	//		false,
+	//		false,
+	//		nil,
+	//	)
+	//	go func() {
+	//		for d := range msgs {
+	//			msg := string(d.Body)
+	//			t.Logf("[111] 接收到消息 %v", msg)
+	//		}
+	//	}()
+	//}()
+
+	//go func() {
+	//	q, _ := client.channel.QueueDeclare(
+	//		"",
+	//		false,
+	//		false,
+	//		true,
+	//		false,
+	//		nil,
+	//	)
+	//
+	//	client.channel.QueueBind(q.Name,
+	//		"",
+	//		"bbb",
+	//		false,
+	//		nil,
+	//	)
+	//	msgs, _ := client.channel.Consume(
+	//		q.Name,
+	//		"",
+	//		true,
+	//		false,
+	//		false,
+	//		false,
+	//		nil,
+	//	)
+	//	go func() {
+	//		for d := range msgs {
+	//			msg := string(d.Body)
+	//			t.Logf("[222] 接收到消息 %v", msg)
+	//		}
+	//	}()
+	//}()
+
+	//for i := 0; i < 10; i++ {
+	//	time.Sleep(3 * time.Second)
+	//
+	//	msg := fmt.Sprintf("hello %d", i)
+	//	log.Printf("publish %v", msg)
+	//	client.channel.PublishWithContext(context.Background(),
+	//		"ccc",
+	//		"",
+	//		false,
+	//		false,
+	//		amqp.Publishing{
+	//			ContentType: "text/plain",
+	//			Body:        []byte(msg),
+	//		},
+	//	)
+	//}
+
+	// producer
+	e2, err := client.NewExchange("bbb").SetKind(KindFanout).Do()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	// consumer 1
+	go func() {
+		q2, err := client.
+			DefQueue().
+			//SetQos(1, false).
+			BindExchange(e2).
+			Do()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		q2.Consume(func(d amqp.Delivery) {
+			msg := string(d.Body)
+			t.Logf("[111] 接收到消息 %v", msg)
+			//time.Sleep(5 * time.Second)
+			//d.Ack(false)
+		})
+
+	}()
+
+	// consumer 2
+	go func() {
+		q3, err := client.DefQueue().
+			//SetQos(1, false).
+			BindExchange(e2).
+			Do()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		q3.Consume(func(d amqp.Delivery) {
+			msg := string(d.Body)
+			t.Logf("[222] 接收到消息 %v", msg)
+			//time.Sleep(5 * time.Second)
+			//d.Ack(false)
+		})
+
+	}()
+
+	for i := 0; i < 10; i++ {
+		time.Sleep(3 * time.Second)
+
+		msg := fmt.Sprintf("hello %d", i)
+		log.Printf("publish %v", msg)
+		if err := e2.Publish(context.Background(), msg); err != nil {
+			t.Error(err)
+		}
+	}
 
 	select {}
 }

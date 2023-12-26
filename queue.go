@@ -11,6 +11,7 @@ package ramqp
 import (
 	"context"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"log"
 )
 
 /*
@@ -56,39 +57,133 @@ func (c *Client) DefChannel() (*Channel, error) {
 */
 
 type Exchange struct {
-	channel    *amqp.Channel
-	Name       string
-	Kind       string
-	Durable    bool
-	AutoDelete bool
-	Internal   bool
-	NoWait     bool
-	Args       amqp.Table
+	channel      *amqp.Channel
+	exchangeName string
+	kind         string
+	durable      bool
+	autoDelete   bool
+	Internal     bool
+	NoWait       bool
+	Args         amqp.Table
+
+	routingKey string
+	queueName  string
+	noExchange bool
 }
+
+type EKind int
+
+const (
+	// KindEmpty default empty
+	KindEmpty EKind = iota
+	// KindHeaders headers
+	KindHeaders
+	// KindFanout fanout
+	KindFanout
+	// KindTopic topic
+	KindTopic
+	// KindDirect direct
+	KindDirect
+)
 
 func (c *Client) NewExchange(name string) *Exchange {
 
 	return &Exchange{
-		channel: c.channel,
-		Name:    name,
-		Kind:    amqp.ExchangeDirect,
+		channel:      c.channel,
+		exchangeName: name,
+		//kind:         amqp.ExchangeDirect,
+		kind:       "",
+		routingKey: "",
+		queueName:  "",
+		noExchange: false,
 	}
 }
 
-func (c *Exchange) SetType(t string) *Exchange {
-	c.Kind = t
+func (c *Client) NoExchangeOnlyQueue(name string) *Exchange {
+	e := c.NewExchange("")
+	e.queueName = name
+	e.noExchange = true
+	return e
+}
+
+func (c *Exchange) SetKind(t EKind) *Exchange {
+	var _t = ""
+	switch t {
+	case KindFanout:
+		_t = amqp.ExchangeFanout
+	case KindHeaders:
+		_t = amqp.ExchangeHeaders
+	case KindTopic:
+		_t = amqp.ExchangeTopic
+	case KindDirect:
+		_t = amqp.ExchangeDirect
+	case KindEmpty:
+		_t = amqp.DefaultExchange
+	default:
+		_t = amqp.ExchangeDirect
+	}
+
+	c.kind = _t
 	return c
 }
 
-func (c *Exchange) Do() error {
-	return c.channel.ExchangeDeclare(
-		c.Name,
-		amqp.ExchangeDirect,
-		true,
+func (c *Exchange) SetRoutingKey(key string) *Exchange {
+	c.routingKey = key
+	return c
+}
+
+func (c *Exchange) Do() (exchange *Exchange, err error) {
+	//if rose.StrIsEmpty(c.exchangeName) {
+	if c.noExchange {
+		log.Printf("exchange Do noExchange queue [%v]", c.queueName)
+		//	name empty so routingKey equal queueName
+		q, err := c.channel.QueueDeclare(
+			c.queueName,
+			true,
+			false,
+			false,
+			false,
+			nil,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		c.routingKey = q.Name
+
+	} else {
+
+		log.Printf("ExchangeDeclare ename [%v] kind [%v]", c.exchangeName, c.kind)
+
+		err = c.channel.ExchangeDeclare(
+			c.exchangeName,
+			c.kind,
+			true,
+			false,
+			false,
+			false,
+			nil,
+		)
+	}
+
+	return c, err
+}
+
+func (c *Exchange) Publish(ctx context.Context, body string) error {
+
+	log.Printf("publish eName [%v] key [%v]", c.exchangeName, c.routingKey)
+
+	return c.channel.PublishWithContext(
+		ctx,
+		c.exchangeName,
+		c.routingKey,
 		false,
 		false,
-		false,
-		nil,
+		amqp.Publishing{
+			//DeliveryMode: amqp.Persistent,
+			ContentType: "text/plain",
+			Body:        []byte(body),
+		},
 	)
 }
 
@@ -101,9 +196,8 @@ type Queue struct {
 	NoWait     bool
 	Args       amqp.Table
 
-	useBind      bool
-	exchangeName string
-	routingKey   string
+	useBind  bool
+	exchange *Exchange
 
 	useQos        bool
 	prefetchCount int
@@ -121,8 +215,6 @@ func (c *Client) NewQueue(name string) *Queue {
 		Args:       nil,
 
 		useBind:       false,
-		exchangeName:  "",
-		routingKey:    "",
 		useQos:        false,
 		prefetchCount: 0,
 		global:        false,
@@ -145,26 +237,30 @@ func (c *Queue) SetQos(count int, global bool) *Queue {
 	return c
 }
 
-func (c *Queue) BindExchange(name, routingKey string) *Queue {
+func (c *Queue) BindExchange(exchange *Exchange) *Queue {
 	c.useBind = true
-	c.exchangeName = name
-	c.routingKey = routingKey
+	c.exchange = exchange
 	return c
 }
 
 func (c *Queue) Do() (queue *Queue, err error) {
 
+	log.Printf("queue Do queueName [%v]", c.queueName)
+
 	q, err := c.channel.QueueDeclare(
 		c.queueName,
+		false,
+		false,
 		true,
-		false,
-		false,
 		false,
 		nil,
 	)
 	if err != nil {
 		return nil, err
 	}
+
+	// important：Redefine the queue name
+	c.queueName = q.Name
 
 	if c.useQos {
 		err = c.channel.Qos(c.prefetchCount, 0, c.global)
@@ -174,10 +270,14 @@ func (c *Queue) Do() (queue *Queue, err error) {
 	}
 
 	if c.useBind {
+
+		log.Printf("key [%v] ename [%v] queueName [%v]", c.exchange.routingKey, c.exchange.exchangeName, q.Name)
+
 		err = c.channel.QueueBind(
 			q.Name,
-			c.routingKey,
-			c.exchangeName,
+			//c.exchange.routingKey,
+			"",
+			c.exchange.exchangeName,
 			false,
 			nil,
 		)
@@ -189,28 +289,12 @@ func (c *Queue) Do() (queue *Queue, err error) {
 	return c, nil
 }
 
-func (c *Queue) Publish(ctx context.Context, body string) error {
-
-	return c.channel.PublishWithContext(
-		ctx,
-		c.exchangeName,
-		c.routingKey,
-		false,
-		false,
-		amqp.Publishing{
-			DeliveryMode: amqp.Persistent,
-			ContentType:  "text/plain",
-			Body:         []byte(body),
-		},
-	)
-}
-
 func (c *Queue) Consume(handler func(delivery amqp.Delivery)) error {
 
 	msgs, err := c.channel.Consume(
 		c.queueName,
 		"",    // consumer 消费者标识
-		false, // autoAck 是否自动应答
+		true,  // autoAck 是否自动应答
 		false, // exclusive 是否独占
 		false, // noLocal
 		false, // noWait 是否阻塞
