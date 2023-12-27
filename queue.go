@@ -125,6 +125,7 @@ func (e *Exchange) SetKind(t EKind) *Exchange {
 	return e
 }
 
+// TODO: 考虑区分一下，在 exchange初始化时设置和在publish时设置的方法名最好区分一下
 func (e *Exchange) SetRoutingKey(key string) *Exchange {
 	e.routingKey = key
 	return e
@@ -183,9 +184,9 @@ func (e *Exchange) Publish(ctx context.Context, body string) error {
 		false,
 		false,
 		amqp.Publishing{
-			DeliveryMode: amqp.Persistent,
-			ContentType:  "text/plain",
-			Body:         []byte(body),
+			//DeliveryMode: amqp.Persistent,
+			ContentType: "text/plain",
+			Body:        []byte(body),
 		},
 	)
 }
@@ -244,14 +245,18 @@ func (q *Queue) SetQos(count int, global bool) *Queue {
 	return q
 }
 
+func (q *Queue) SetQosCount(count int) *Queue {
+	return q.SetQos(count, false)
+}
+
 func (q *Queue) BindExchange(exchange *Exchange) *Queue {
 	q.useBind = true
 	q.exchange = exchange
 	return q
 }
 
-// SetBindRoutingKeys 如何设置则自定义队列绑定key，否则使用exchange中定义的key
-func (q *Queue) SetBindRoutingKeys(keys []string) *Queue {
+// SetBindKeys 如何设置则自定义队列绑定key，否则使用exchange中定义的key
+func (q *Queue) SetBindKeys(keys []string) *Queue {
 	if len(keys) > 0 {
 		q.bindRoutingKeys = keys
 	} else {
@@ -288,7 +293,7 @@ func (q *Queue) Do() (queue *Queue, err error) {
 
 	if q.useBind {
 
-		log.Printf("key [%v] ename [%v] queueName [%v]", q.exchange.routingKey, q.exchange.exchangeName, theQ.Name)
+		log.Printf("key [%v] ename [%v] queueName [%v]", q.bindRoutingKeys, q.exchange.exchangeName, theQ.Name)
 
 		for _, key := range q.bindRoutingKeys {
 			err = q.channel.QueueBind(

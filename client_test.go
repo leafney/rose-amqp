@@ -347,21 +347,129 @@ func TestFive(t *testing.T) {
 	}
 	defer client.Close()
 
-	//	producer
+	//	exchange
 
-	e5, err := client.
-		NewExchange("ddd").
-		SetKind(KindTopic).
-		SetDurable(true).
-		SetRoutingKey(""). // routingKey 可以在这里声明，统一的
-		Do()
-	if err != nil {
-		t.Error(err)
-		return
-	}
+	//e5, err := client.
+	//	NewExchange("ddd").
+	//	SetKind(KindTopic).
+	//	SetDurable(true).
+	//	//SetRoutingKey(""). // routingKey 可以在这里声明，统一的
+	//	Do()
+	//if err != nil {
+	//	t.Error(err)
+	//	return
+	//}
 
-	e5.
-		//SetRoutingKey(""). // routingKey 也可以在这里声明，可以设置每次发布不同值
-		Publish(context.Background(), "hello")
+	client.channel.ExchangeDeclare(
+		"eee",
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
 
+	//	consumer 1
+	go func() {
+		//q5, err := client.DefQueue().SetDurable(false).
+		//	BindExchange(e5).
+		//	SetBindKeys([]string{"orange.*"}).Do()
+		//if err != nil {
+		//	t.Error(err)
+		//	return
+		//}
+		//
+		//q5.Consume(func(d amqp.Delivery) {
+		//	msg := string(d.Body)
+		//	t.Logf("[555] 接收到消息 %v", msg)
+		//})
+
+		q5, _ := client.channel.QueueDeclare(
+			"my_queue_name",
+			false,
+			false,
+			true,
+			false,
+			nil,
+		)
+
+		log.Printf("q5 queue name [%v]", q5.Name)
+
+		client.channel.QueueBind(
+			q5.Name,
+			"*.com",
+			"eee",
+			false,
+			nil,
+		)
+
+		msgs, _ := client.channel.Consume(
+			q5.Name,
+			"",
+			true,
+			false,
+			false,
+			false,
+			nil,
+		)
+		go func() {
+			for d := range msgs {
+				msg := string(d.Body)
+				t.Logf("[555-555] 接收到消息 %v", msg)
+			}
+		}()
+
+	}()
+
+	log.Println("publish start")
+
+	// publish
+
+	//e5.
+	//	SetRoutingKey("orange.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值
+	//	Publish(context.Background(), "hello")
+	//
+	//time.Sleep(5 * time.Second)
+	//
+	//e5.
+	//	SetRoutingKey("apple.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值
+	//	Publish(context.Background(), "world")
+
+	msg1 := "hello"
+	key1 := "baidu.com"
+	log.Printf("publish msg1 %v with key1 %v", msg1, key1)
+	client.channel.PublishWithContext(context.Background(),
+		"eee",
+		key1,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(msg1),
+		},
+	)
+
+	/*
+		time.Sleep(5 * time.Second)
+
+			msg2 := "world"
+			key2 := "apple.hello"
+			log.Printf("publish msg2 %v with key2 %v", msg1, key1)
+			client.channel.PublishWithContext(context.Background(),
+				"eee",
+				key2,
+				false,
+				false,
+				amqp.Publishing{
+					ContentType: "text/plain",
+					Body:        []byte(msg2),
+				},
+			)
+
+	*/
+
+	log.Println("publish end")
+
+	select {}
 }
