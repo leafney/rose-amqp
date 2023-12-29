@@ -236,7 +236,7 @@ func (c *Client) Consume(queueName string, handler func(delivery amqp.Delivery))
 		q.Name,
 		"",    // consumer 消费者标识
 		false, // autoAck 是否自动应答
-		false, // exclusive 是否独占
+		false, // queueExclusive 是否独占
 		false, // noLocal
 		false, // noWait 是否阻塞
 		nil,   // args

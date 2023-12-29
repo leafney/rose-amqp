@@ -340,7 +340,7 @@ func TestFour(t *testing.T) {
 }
 
 // topics
-func TestFive(t *testing.T) {
+func TestFive1(t *testing.T) {
 	client, err := NewClient(AMQPUrl)
 	if err != nil {
 		t.Fatal(err)
@@ -349,16 +349,53 @@ func TestFive(t *testing.T) {
 
 	//	exchange
 
-	//e5, err := client.
-	//	NewExchange("ddd").
-	//	SetKind(KindTopic).
-	//	SetDurable(true).
-	//	//SetRoutingKey(""). // routingKey 可以在这里声明，统一的
-	//	Do()
-	//if err != nil {
-	//	t.Error(err)
-	//	return
-	//}
+	e5, err := client.
+		NewExchange("ddd").
+		SetKind(KindTopic).
+		SetDurable(true).
+		//SetRoutingKey(""). // routingKey 可以在这里声明，统一的
+		Do()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	//	consumer 1
+	q5, err := client.DefQueue().
+		BindExchange(e5).
+		SetBindKeys([]string{"orange.*"}).Do()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	q5.Consume(func(d amqp.Delivery) {
+		msg := string(d.Body)
+		t.Logf("[555] 接收到消息 %v", msg)
+	})
+
+	// publish
+	e5.SetRoutingKey("orange.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值
+		Publish(context.Background(), "hello1")
+
+	time.Sleep(5 * time.Second)
+
+	e5.
+		SetRoutingKey("apple.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值
+		Publish(context.Background(), "world1")
+
+	log.Println("publish end")
+
+	select {}
+}
+
+// topic
+func TestFive2(t *testing.T) {
+	client, err := NewClient(AMQPUrl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
 
 	client.channel.ExchangeDeclare(
 		"eee",
@@ -370,74 +407,45 @@ func TestFive(t *testing.T) {
 		nil,
 	)
 
-	//	consumer 1
+	q6, _ := client.channel.QueueDeclare(
+		"",
+		false,
+		false,
+		true,
+		false,
+		nil,
+	)
+
+	log.Printf("q5 queue name [%v]", q6.Name)
+
+	client.channel.QueueBind(
+		q6.Name,
+		"*.com",
+		"eee",
+		false,
+		nil,
+	)
+
+	msgs, _ := client.channel.Consume(
+		q6.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
 	go func() {
-		//q5, err := client.DefQueue().SetDurable(false).
-		//	BindExchange(e5).
-		//	SetBindKeys([]string{"orange.*"}).Do()
-		//if err != nil {
-		//	t.Error(err)
-		//	return
-		//}
-		//
-		//q5.Consume(func(d amqp.Delivery) {
-		//	msg := string(d.Body)
-		//	t.Logf("[555] 接收到消息 %v", msg)
-		//})
-
-		q5, _ := client.channel.QueueDeclare(
-			"my_queue_name",
-			false,
-			false,
-			true,
-			false,
-			nil,
-		)
-
-		log.Printf("q5 queue name [%v]", q5.Name)
-
-		client.channel.QueueBind(
-			q5.Name,
-			"*.com",
-			"eee",
-			false,
-			nil,
-		)
-
-		msgs, _ := client.channel.Consume(
-			q5.Name,
-			"",
-			true,
-			false,
-			false,
-			false,
-			nil,
-		)
-		go func() {
-			for d := range msgs {
-				msg := string(d.Body)
-				t.Logf("[555-555] 接收到消息 %v", msg)
-			}
-		}()
-
+		for d := range msgs {
+			msg := string(d.Body)
+			t.Logf("[555-555] 接收到消息 %v", msg)
+		}
 	}()
 
 	log.Println("publish start")
 
-	// publish
-
-	//e5.
-	//	SetRoutingKey("orange.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值
-	//	Publish(context.Background(), "hello")
-	//
-	//time.Sleep(5 * time.Second)
-	//
-	//e5.
-	//	SetRoutingKey("apple.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值
-	//	Publish(context.Background(), "world")
-
 	msg1 := "hello"
-	key1 := "baidu.com"
+	key1 := "kook.com"
 	log.Printf("publish msg1 %v with key1 %v", msg1, key1)
 	client.channel.PublishWithContext(context.Background(),
 		"eee",
@@ -445,31 +453,12 @@ func TestFive(t *testing.T) {
 		false,
 		false,
 		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        []byte(msg1),
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "text/plain",
+			Body:         []byte(msg1),
 		},
 	)
 
-	/*
-		time.Sleep(5 * time.Second)
-
-			msg2 := "world"
-			key2 := "apple.hello"
-			log.Printf("publish msg2 %v with key2 %v", msg1, key1)
-			client.channel.PublishWithContext(context.Background(),
-				"eee",
-				key2,
-				false,
-				false,
-				amqp.Publishing{
-					ContentType: "text/plain",
-					Body:        []byte(msg2),
-				},
-			)
-
-	*/
-
 	log.Println("publish end")
-
 	select {}
 }

@@ -192,13 +192,14 @@ func (e *Exchange) Publish(ctx context.Context, body string) error {
 }
 
 type Queue struct {
-	channel    *amqp.Channel
-	queueName  string
-	durable    bool
-	autoDelete bool
-	exclusive  bool
-	noWait     bool
-	args       amqp.Table
+	channel        *amqp.Channel
+	queueName      string
+	durable        bool
+	autoDelete     bool
+	queueExclusive bool
+
+	noWait bool
+	args   amqp.Table
 
 	useBind         bool
 	exchange        *Exchange
@@ -208,17 +209,20 @@ type Queue struct {
 
 	prefetchCount int
 	global        bool
+
+	consumerExclusive bool
+	autoAck           bool
 }
 
 func (c *Client) NewQueue(name string) *Queue {
 	return &Queue{
-		channel:    c.channel,
-		queueName:  name,
-		durable:    false,
-		autoDelete: false,
-		exclusive:  false,
-		noWait:     false,
-		args:       nil,
+		channel:        c.channel,
+		queueName:      name,
+		durable:        false,
+		autoDelete:     false,
+		queueExclusive: false,
+		noWait:         false,
+		args:           nil,
 
 		useBind:         false,
 		bindRoutingKeys: make([]string, 0),
@@ -226,15 +230,25 @@ func (c *Client) NewQueue(name string) *Queue {
 		useQos:        false,
 		prefetchCount: 0,
 		global:        false,
+
+		autoAck: true,
 	}
 }
 
 func (c *Client) DefQueue() *Queue {
-	return c.NewQueue("")
+	theQ := c.NewQueue("")
+	// 无名队列默认设置为排他性队列
+	theQ.queueExclusive = true
+	return theQ
 }
 
 func (q *Queue) SetDurable(durable bool) *Queue {
 	q.durable = durable
+	return q
+}
+
+func (q *Queue) SetQueueExclusive(exclusive bool) *Queue {
+	q.queueExclusive = exclusive
 	return q
 }
 
@@ -247,6 +261,11 @@ func (q *Queue) SetQos(count int, global bool) *Queue {
 
 func (q *Queue) SetQosCount(count int) *Queue {
 	return q.SetQos(count, false)
+}
+
+func (q *Queue) SetAutoAck(ack bool) *Queue {
+	q.autoAck = ack
+	return q
 }
 
 func (q *Queue) BindExchange(exchange *Exchange) *Queue {
@@ -267,13 +286,13 @@ func (q *Queue) SetBindKeys(keys []string) *Queue {
 
 func (q *Queue) Do() (queue *Queue, err error) {
 
-	log.Printf("queue Do queueName [%v]", q.queueName)
+	log.Printf("queue Do queueName [%v] durable [%v]", q.queueName, q.durable)
 
 	theQ, err := q.channel.QueueDeclare(
 		q.queueName,
 		q.durable,
 		false,
-		false,
+		q.queueExclusive,
 		false,
 		nil,
 	)
@@ -316,12 +335,12 @@ func (q *Queue) Consume(handler func(delivery amqp.Delivery)) error {
 
 	msgs, err := q.channel.Consume(
 		q.queueName,
-		"",    // consumer 消费者标识
-		true,  // autoAck 是否自动应答
-		false, // exclusive 是否独占
-		false, // noLocal
-		false, // noWait 是否阻塞
-		nil,   // args
+		"",        // consumer 消费者标识
+		q.autoAck, // autoAck 是否自动应答
+		false,     // queueExclusive 是否独占
+		false,     // noLocal
+		false,     // noWait 是否阻塞
+		nil,       // args
 	)
 	if err != nil {
 		return err
