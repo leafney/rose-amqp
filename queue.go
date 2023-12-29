@@ -11,7 +11,6 @@ package ramqp
 import (
 	"context"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"log"
 )
 
 /*
@@ -137,9 +136,8 @@ func (e *Exchange) SetDurable(durable bool) *Exchange {
 }
 
 func (e *Exchange) Do() (exchange *Exchange, err error) {
-	//if rose.StrIsEmpty(e.exchangeName) {
+
 	if e.noExchange {
-		log.Printf("exchange Do noExchange queue [%v]", e.queueName)
 		//	name empty so routingKey equal queueName
 		theQ, err := e.channel.QueueDeclare(
 			e.queueName,
@@ -157,8 +155,6 @@ func (e *Exchange) Do() (exchange *Exchange, err error) {
 
 	} else {
 
-		log.Printf("ExchangeDeclare ename [%v] kind [%v]", e.exchangeName, e.kind)
-
 		err = e.channel.ExchangeDeclare(
 			e.exchangeName,
 			e.kind,
@@ -175,8 +171,6 @@ func (e *Exchange) Do() (exchange *Exchange, err error) {
 
 func (e *Exchange) Publish(ctx context.Context, body string) error {
 
-	log.Printf("publish eName [%v] key [%v]", e.exchangeName, e.routingKey)
-
 	return e.channel.PublishWithContext(
 		ctx,
 		e.exchangeName,
@@ -184,9 +178,9 @@ func (e *Exchange) Publish(ctx context.Context, body string) error {
 		false,
 		false,
 		amqp.Publishing{
-			//DeliveryMode: amqp.Persistent,
-			ContentType: "text/plain",
-			Body:        []byte(body),
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "text/plain",
+			Body:         []byte(body),
 		},
 	)
 }
@@ -286,8 +280,6 @@ func (q *Queue) SetBindKeys(keys []string) *Queue {
 
 func (q *Queue) Do() (queue *Queue, err error) {
 
-	log.Printf("queue Do queueName [%v] durable [%v]", q.queueName, q.durable)
-
 	theQ, err := q.channel.QueueDeclare(
 		q.queueName,
 		q.durable,
@@ -312,8 +304,6 @@ func (q *Queue) Do() (queue *Queue, err error) {
 
 	if q.useBind {
 
-		log.Printf("key [%v] ename [%v] queueName [%v]", q.bindRoutingKeys, q.exchange.exchangeName, theQ.Name)
-
 		for _, key := range q.bindRoutingKeys {
 			err = q.channel.QueueBind(
 				theQ.Name,
@@ -337,7 +327,7 @@ func (q *Queue) Consume(handler func(delivery amqp.Delivery)) error {
 		q.queueName,
 		"",        // consumer 消费者标识
 		q.autoAck, // autoAck 是否自动应答
-		false,     // queueExclusive 是否独占
+		false,     // exclusive 是否独占
 		false,     // noLocal
 		false,     // noWait 是否阻塞
 		nil,       // args
