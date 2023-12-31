@@ -169,7 +169,9 @@ func (e *Exchange) Do() (exchange *Exchange, err error) {
 	return e, err
 }
 
-func (e *Exchange) Publish(ctx context.Context, body string) error {
+// ***************************
+
+func (e *Exchange) PublishBCtx(ctx context.Context, body []byte) error {
 
 	return e.channel.PublishWithContext(
 		ctx,
@@ -180,10 +182,51 @@ func (e *Exchange) Publish(ctx context.Context, body string) error {
 		amqp.Publishing{
 			DeliveryMode: amqp.Persistent,
 			ContentType:  "text/plain",
-			Body:         []byte(body),
+			Body:         body,
 		},
 	)
 }
+
+func (e *Exchange) PublishB(body []byte) error {
+	return e.PublishBCtx(context.Background(), body)
+}
+
+func (e *Exchange) PublishCtx(ctx context.Context, body string) error {
+	return e.PublishBCtx(ctx, []byte(body))
+}
+
+func (e *Exchange) Publish(body string) error {
+	return e.PublishCtx(context.Background(), body)
+}
+
+func (e *Exchange) PublishBWithKeyCtx(ctx context.Context, key string, body []byte) error {
+	return e.channel.PublishWithContext(
+		ctx,
+		e.exchangeName,
+		key,
+		false,
+		false,
+		amqp.Publishing{
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "text/plain",
+			Body:         body,
+		},
+	)
+}
+
+func (e *Exchange) PublishBWithKey(key string, body []byte) error {
+	return e.PublishBWithKeyCtx(context.Background(), key, body)
+}
+
+func (e *Exchange) PublishWithKeyCtx(ctx context.Context, key, body string) error {
+	return e.PublishBWithKeyCtx(ctx, key, []byte(body))
+}
+
+func (e *Exchange) PublishWithKey(key, body string) error {
+	return e.PublishWithKeyCtx(context.Background(), key, body)
+}
+
+// ***************************
 
 type Queue struct {
 	channel        *amqp.Channel

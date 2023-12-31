@@ -103,7 +103,7 @@ func TestTwo(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		msg := fmt.Sprintf("hello %d", i)
 		log.Printf("publish %v", msg)
-		if err := eee.Publish(context.Background(), msg); err != nil {
+		if err := eee.PublishCtx(context.Background(), msg); err != nil {
 			t.Error(err)
 		}
 	}
@@ -138,7 +138,7 @@ func TestThree(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		msg := fmt.Sprintf("hello %d", i)
 		log.Printf("publish %v", msg)
-		if err := e1.Publish(context.Background(), msg); err != nil {
+		if err := e1.PublishCtx(context.Background(), msg); err != nil {
 			t.Error(err)
 		}
 	}
@@ -331,7 +331,7 @@ func TestFour(t *testing.T) {
 
 		msg := fmt.Sprintf("hello %d", i)
 		log.Printf("publish %v", msg)
-		if err := e2.Publish(context.Background(), msg); err != nil {
+		if err := e2.Publish(msg); err != nil {
 			t.Error(err)
 		}
 	}
@@ -369,20 +369,20 @@ func TestFive1(t *testing.T) {
 		return
 	}
 
-	q5.Consume(func(d amqp.Delivery) {
-		msg := string(d.Body)
-		t.Logf("[555] 接收到消息 %v", msg)
-	})
+	//q5.Consume(func(d amqp.Delivery) {
+	//	msg := string(d.Body)
+	//	t.Logf("[555] 接收到消息 %v", msg)
+	//})
 
 	// publish
 	e5.SetRoutingKey("orange.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值
-		Publish(context.Background(), "hello1")
+						Publish("hello1")
 
 	time.Sleep(5 * time.Second)
 
 	e5.
 		SetRoutingKey("apple.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值
-		Publish(context.Background(), "world1")
+		Publish("world1")
 
 	log.Println("publish end")
 
