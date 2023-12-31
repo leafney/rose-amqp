@@ -109,7 +109,7 @@ func TestTwo(t *testing.T) {
 	}
 
 	go func() {
-		qq.Consume(func(d amqp.Delivery) {
+		qq.BaseConsume(func(d amqp.Delivery) {
 			msg := string(d.Body)
 			t.Logf("接收到消息 %v", msg)
 			time.Sleep(5 * time.Second)
@@ -150,7 +150,7 @@ func TestThree(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		q1.Consume(func(d amqp.Delivery) {
+		q1.BaseConsume(func(d amqp.Delivery) {
 			msg := string(d.Body)
 			t.Logf("[111] 接收到消息 %v", msg)
 			time.Sleep(5 * time.Second)
@@ -166,7 +166,7 @@ func TestThree(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		q1.Consume(func(d amqp.Delivery) {
+		q1.BaseConsume(func(d amqp.Delivery) {
 			msg := string(d.Body)
 			t.Logf("[222] 接收到消息 %v", msg)
 			time.Sleep(5 * time.Second)
@@ -298,7 +298,7 @@ func TestFour(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		q2.Consume(func(d amqp.Delivery) {
+		q2.BaseConsume(func(d amqp.Delivery) {
 			msg := string(d.Body)
 			t.Logf("[111] 接收到消息 %v", msg)
 			//time.Sleep(5 * time.Second)
@@ -317,7 +317,7 @@ func TestFour(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		q3.Consume(func(d amqp.Delivery) {
+		q3.BaseConsume(func(d amqp.Delivery) {
 			msg := string(d.Body)
 			t.Logf("[222] 接收到消息 %v", msg)
 			//time.Sleep(5 * time.Second)
@@ -373,6 +373,11 @@ func TestFive1(t *testing.T) {
 	//	msg := string(d.Body)
 	//	t.Logf("[555] 接收到消息 %v", msg)
 	//})
+
+	q5.Consume(func(msg *XMessage) {
+		msg.Success()
+
+	})
 
 	// publish
 	e5.SetRoutingKey("orange.hello"). // routingKey 也可以在这里声明，可以设置每次发布不同值

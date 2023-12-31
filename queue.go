@@ -364,9 +364,8 @@ func (q *Queue) Do() (queue *Queue, err error) {
 	return q, nil
 }
 
-func (q *Queue) Consume(handler func(delivery amqp.Delivery)) error {
-
-	msgs, err := q.channel.Consume(
+func (q *Queue) BaseConsume(handler func(d amqp.Delivery)) error {
+	deliveries, err := q.channel.Consume(
 		q.queueName,
 		"",        // consumer 消费者标识
 		q.autoAck, // autoAck 是否自动应答
@@ -380,7 +379,31 @@ func (q *Queue) Consume(handler func(delivery amqp.Delivery)) error {
 	}
 
 	go func() {
-		for msg := range msgs {
+		for d := range deliveries {
+			handler(d)
+		}
+	}()
+
+	return nil
+}
+
+func (q *Queue) Consume(handler func(m *XMessage)) error {
+	deliveries, err := q.channel.Consume(
+		q.queueName,
+		"",        // consumer 消费者标识
+		q.autoAck, // autoAck 是否自动应答
+		false,     // exclusive 是否独占
+		false,     // noLocal
+		false,     // noWait 是否阻塞
+		nil,       // args
+	)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for d := range deliveries {
+			msg := &XMessage{d}
 			handler(msg)
 		}
 	}()
